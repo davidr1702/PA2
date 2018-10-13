@@ -110,7 +110,16 @@ class RDT:
             while i==0:
                 #check if we have received enough bytes
                 if(len(self.byte_buffer) < Packet.length_S_length):
-                    return ret_S #not enough bytes to read packet length
+                    self.seq_num = 0
+                    seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
+                    #convert length to a byte field of length_S_length bytes
+                    length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(msg_S)).zfill(Packet.length_S_length)
+                    checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
+                    checksum_S = checksum.hexdigest()
+                    p = Packet(self.seq_num, msg_S, checksum_S)
+                    self.statesend=2
+                    self.network.udt_send(p.get_byte_S())  #not enough bytes to read packet length
+                    continue #not enough bytes to read packet length
                 #extract length of packet
                 length = int(self.byte_buffer[:Packet.length_S_length])
                 if len(self.byte_buffer) < length:
@@ -126,11 +135,13 @@ class RDT:
                     ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                     self.byte_buffer = self.byte_buffer[length:]
                     self.network.udt_send(p.get_byte_S())
+                    return ret_S
                 else:
                     print("E2")
                     ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                     self.byte_buffer = self.byte_buffer[length:]
                     self.statesend=3
+                    return ret_S
         # If packet is corrupted or we received NAK 2     
         elif (self.statesend==4):
             print("L")
@@ -141,7 +152,16 @@ class RDT:
                 #keep extracting packets - if reordered, could get more than one
                 #check if we have received enough bytes
                 if(len(self.byte_buffer) < Packet.length_S_length):
-                    return ret_S #not enough bytes to read packet length
+                    self.seq_num = 1
+                    seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
+                    #convert length to a byte field of length_S_length bytes
+                    length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(msg_S)).zfill(Packet.length_S_length)
+                    checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
+                    checksum_S = checksum.hexdigest()
+                    p = Packet(self.seq_num, msg_S, checksum_S)
+                    self.statesend=2
+                    self.network.udt_send(p.get_byte_S()) #not enough bytes to read packet length
+                    continue #not enough bytes to read packet length
                 #extract length of packet
                 length = int(self.byte_buffer[:Packet.length_S_length])
                 if len(self.byte_buffer) < length:
@@ -339,4 +359,3 @@ if __name__ == '__main__':
         print(rdt.rdt_1_0_receive())
         rdt.rdt_1_0_send('MSG_FROM_SERVER')
         rdt.disconnect()
-
