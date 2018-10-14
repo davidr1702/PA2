@@ -136,7 +136,6 @@ class RDT:
                             self.byte_buffer = self.byte_buffer[length:]
                             #if we receive not ACK
                             if (p2.ack=="NAK"):
-                                print("I DID SOMETHING")
                                 ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                                 Packet.ack="ACK"
                                 self.network.udt_send(p.get_byte_S())
