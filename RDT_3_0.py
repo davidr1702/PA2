@@ -1,5 +1,7 @@
 import Network_3_0
 import argparse
+import time
+import threading
 from time import sleep
 import hashlib
 
@@ -59,7 +61,7 @@ class RDT:
     seq_num = 1
     ## buffer of bytes read from network
     byte_buffer = ''
-    
+    message=''
     stateR=1
     statesend=1
     counter=0
@@ -289,22 +291,21 @@ class RDT:
                                 self.network.udt_send(sndpkt.get_byte_S())
                         
                         
-    def resend(self, msg_S):
-        raise RuntimeError('Timer is up')
-##        self.counter==1
-##        seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
-##        #convert length to a byte field of length_S_length bytes
-##        length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(msg_S)).zfill(Packet.length_S_length)
-##        checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
-##        checksum_S = checksum.hexdigest()
-##        p = Packet(self.seq_num, msg_S, checksum_S)
-##        self.statesend=2
-##        self.network.udt_send(p.get_byte_S())
-          #timer.start()
+    def resend(self):
+        print("TIME OUT")
+        seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
+        #convert length to a byte field of length_S_length bytes
+        length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(self.message)).zfill(Packet.length_S_length)
+        checksum = hashlib.md5((length_S+seq_num_S+self.message).encode('utf-8'))
+        checksum_S = checksum.hexdigest()
+        p = Packet(self.seq_num, self.message, checksum_S)
+        self.network.udt_send(p.get_byte_S())
+        timer=threading.Timer(1,self.resend)
+        timer.start()
         
     def rdt_3_0_send(self, msg_S):
-        timer=threading.Timer(5,self.resend)
-        
+        timer=threading.Timer(1,self.resend)
+        self.message=msg_S
         self.changeState()
         seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
         #convert length to a byte field of length_S_length bytes
@@ -312,11 +313,12 @@ class RDT:
         checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
         checksum_S = checksum.hexdigest()
         p = Packet(self.seq_num, msg_S, checksum_S)
+        timer.start()
         
         if(self.statesend==1): #wait for call from appl 1
             self.statesend=2
             self.network.udt_send(p.get_byte_S())
-            timer.start()
+            
             
         if (self.statesend==2):
             ret_S = None
@@ -332,7 +334,6 @@ class RDT:
                         #if packet is corrupted 
                         if((Packet.corrupt(self.byte_buffer[0:length]))):
                             self.byte_buffer = self.byte_buffer[length:]
-                            print("DDDDDDDDD: " + Packet.ack)
                             self.network.udt_send(p.get_byte_S())
                             ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                             timer.cancel()
@@ -342,7 +343,6 @@ class RDT:
                             self.byte_buffer = self.byte_buffer[length:]
                             #if we receive not ACK
                             if (p2.ack=="NAK"):
-                                print("I DID SOMETHING")
                                 ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                                 Packet.ack="ACK"
                                 self.network.udt_send(p.get_byte_S())
