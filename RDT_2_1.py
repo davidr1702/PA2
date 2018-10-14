@@ -59,7 +59,7 @@ class RDT:
     seq_num = 1
     ## buffer of bytes read from network
     byte_buffer = ''
-    
+    pa=Packet(0, "", "")
     stateR=1
     statesend=1
     counter=0
@@ -101,21 +101,20 @@ class RDT:
             self.seq_num=0
             
     def rdt_2_1_send(self, msg_S):
-        self.changeState()
-        seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
-        #convert length to a byte field of length_S_length bytes
-        length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(msg_S)).zfill(Packet.length_S_length)
-        checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
-        checksum_S = checksum.hexdigest()
-        p = Packet(self.seq_num, msg_S, checksum_S)
-        
         if(self.statesend==1): #wait for call from appl 1
+            self.changeState()
+            seq_num_S = str(self.seq_num).zfill(Packet.seq_num_S_length)
+            #convert length to a byte field of length_S_length bytes
+            length_S = str(Packet.length_S_length + len(seq_num_S) + Packet.checksum_length + len(msg_S)).zfill(Packet.length_S_length)
+            checksum = hashlib.md5((length_S+seq_num_S+msg_S).encode('utf-8'))
+            checksum_S = checksum.hexdigest()
+            p = Packet(self.seq_num, msg_S, checksum_S)
+            self.pa=p
             self.statesend=2
             self.network.udt_send(p.get_byte_S())
             
         if (self.statesend==2):
             ret_S = None
-            i=0
             #keep extracting packets - if reordered, could get more than one
             while True:
                 byte_S = self.network.udt_receive()
@@ -124,31 +123,34 @@ class RDT:
                 if(len(self.byte_buffer) >= Packet.length_S_length):
                     length = int(self.byte_buffer[:Packet.length_S_length])
                     if len(self.byte_buffer) >= length:
-                        #if packet is corrupted 
-                        if((Packet.corrupt(self.byte_buffer[0:length]))):
+                        #if packet is corrupted
+                        if((Packet.corrupt(self.byte_buffer[0:length])) or Packet.ack=="NAK"):
+                            print("The packet was corrupt")
+                            #self.changeState()
                             self.byte_buffer = self.byte_buffer[length:]
-                            print("DDDDDDDDD: " + Packet.ack)
-                            self.network.udt_send(p.get_byte_S())
-                            ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
-                            #return ret_S
+                            #Packet.ack="ACK"
+                            self.network.udt_send(self.pa.get_byte_S())
+                            #ret_S = self.pa.msg_S if (ret_S is None) else ret_S + p.msg_S
+                            Packet.ack="ACK"
+                            #self.changeState()
+                            #break
                         else:
                             p2 = Packet.from_byte_S(self.byte_buffer[0:length])
                             self.byte_buffer = self.byte_buffer[length:]
                             #if we receive not ACK
-                            if (p2.ack=="NAK"):
-                                ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
-                                Packet.ack="ACK"
-                                self.network.udt_send(p.get_byte_S())
-                                return ret_S
-                            else:
-                                ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
-                                self.statesend=1
-                                return
+                            #if (p2.ack=="NAK"):
+                                #print("AAAAAAAAAAAAAAAAA")
+                                #ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
+                                #Packet.ack="ACK"
+                                #self.network.udt_send(p.get_byte_S())
+                                #return ret_S
+                            ret_S = p2.msg_S if (ret_S is None) else ret_S + p2.msg_S
+                            self.statesend=1
+                            Packet.ack="ACK"
+                            return
                             
         
             
-        # If packet is corrupted or we received NAK 1
-           
     def rdt_2_1_receive(self):
         
         if (self.stateR==1):
@@ -164,15 +166,15 @@ class RDT:
                 if len(self.byte_buffer) < length:
                     return ret_S #not enough bytes to read the whole packet
                 
-                if (Packet.corrupt(self.byte_buffer[0:length])):
+                if (Packet.corrupt(self.byte_buffer[0:length])): 
+                    print("The packet was corrupt Receive 1")
                     self.byte_buffer = self.byte_buffer[length:]
                     checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                     sndpkt=Packet(self.seq_num, checksum_S,"NAK")
                     Packet.ack="NAK"
-                    print("BBBBB: " + Packet.ack)
                     self.network.udt_send(sndpkt.get_byte_S())
                     ret_S = sndpkt.msg_S if (ret_S is None) else ret_S + sndpkt.msg_S
-                    #return ret_S
+                    return
 
                 else:
                     #create packet from buffer content and add to return string
@@ -183,11 +185,12 @@ class RDT:
                         ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                         checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                         sndpkt=Packet(p.seq_num, checksum_S, "ACK")
-                        Packet.ack="ACK"
+                        #Packet.ack="ACK"
                         self.network.udt_send(sndpkt.get_byte_S())
                         return ret_S
                         
                     elif(self.seq_num==1):
+                        print("The Packet was not corrupted?1")
                         #keep extracting packets - if reordered, could get more than one
                         while True:
                             #check if we have received enough bytes
@@ -201,11 +204,9 @@ class RDT:
                             if (Packet.corrupt(self.byte_buffer[0:length])):
                                 checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                                 sndpkt=Packet(self.seq_num, checksum_S,"NAK")
-                                Packet.ack="NAK"
-                                print("TTTTTTTTTTTTTT: " + Packet.ack)
+                                #Packet.ack="NAK"
                                 self.network.udt_send(sndpkt.get_byte_S())
                                 self.byte_buffer = self.byte_buffer[length:]
-                                return
                             else:
                                 p = Packet.from_byte_S(self.byte_buffer[0:length])
                                 ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
@@ -217,6 +218,7 @@ class RDT:
                                 sndpkt=Packet(p.seq_num, checksum_S,"ACK")
                                 Packet.ack="ACK"
                                 self.network.udt_send(sndpkt.get_byte_S())
+                    self.byte_buffer = self.byte_buffer[length:]
                          
         if(self.stateR==2):
             ret_S = None
@@ -232,31 +234,31 @@ class RDT:
                 if len(self.byte_buffer) < length:
                     return ret_S #not enough bytes to read the whole packet
                 
-    
                 if (Packet.corrupt(self.byte_buffer[0:length])):
+                    print("The packet was corrupt Receive 2")
                     self.byte_buffer = self.byte_buffer[length:]
                     checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                     sndpkt=Packet(self.seq_num, checksum_S,"NAK")
                     Packet.ack="NAK"
-                    print("CCCCCCCC: " + Packet.ack)
                     self.network.udt_send(sndpkt.get_byte_S())
                     ret_S = sndpkt.msg_S if (ret_S is None) else ret_S + sndpkt.msg_S
                     #return ret_S
+                    return
+                    #break
                 else:
                     #create packet from buffer content and add to return string
                     p = Packet.from_byte_S(self.byte_buffer[0:length])
-                    
-                    
                     if (self.seq_num==1):
                         self.byte_buffer = self.byte_buffer[length:]
                         checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                         sndpkt=Packet(p.seq_num, checksum_S, "ACK")
-                        Packet.ack="ACK"
+                        #Packet.ack="ACK"
                         ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
                         self.network.udt_send(sndpkt.get_byte_S())
                         return ret_S
             
                     elif(self.seq_num==0):
+                        print("The Packet was not corrupted?2")
                         #keep extracting packets - if reordered, could get more than one
                         while True:
                             #check if we have received enough bytes
@@ -270,11 +272,9 @@ class RDT:
                             if (Packet.corrupt(self.byte_buffer[0:length])):
                                 checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                                 sndpkt=Packet(self.seq_num, checksum_S,"NAK")
-                                Packet.ack="NAK"
-                                print("YYYYYYYYYYY: " + Packet.ack)
+                                #Packet.ack="NAK"
                                 self.network.udt_send(sndpkt.get_byte_S())
                                 self.byte_buffer = self.byte_buffer[length:]
-                                return
                             else:
                                 p = Packet.from_byte_S(self.byte_buffer[0:length])
                                 ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
@@ -284,7 +284,7 @@ class RDT:
                                 self.stateR=1
                                 checksum_S = self.byte_buffer[Packet.seq_num_S_length+Packet.seq_num_S_length : Packet.seq_num_S_length+Packet.length_S_length+Packet.checksum_length]
                                 sndpkt=Packet(p.seq_num, checksum_S,"ACK")
-                                Packet.ack="ACK"
+                                #Packet.ack="ACK"
                                 self.network.udt_send(sndpkt.get_byte_S())
                         
                            
